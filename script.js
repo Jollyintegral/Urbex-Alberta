@@ -1,4 +1,4 @@
-﻿// --- Firebase (Firestore for storing spots) ---
+// --- Firebase (Firestore for storing spots) ---
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
 import { 
   getFirestore, collection, addDoc, getDocs, serverTimestamp, doc, updateDoc, getDoc, setDoc
@@ -676,6 +676,100 @@ function initAuthGate() {
   });
 }
 
+function addLocationControl() {
+  const locationControl = L.control({ position: 'bottomright' });
+
+  locationControl.onAdd = function () {
+    const btn = L.DomUtil.create('button', 'locate-btn');
+    btn.type = 'button';
+    btn.setAttribute('aria-label', 'Show my location');
+    btn.title = 'My location';
+
+    // SVG: crosshair for desktop, compass-dot for mobile (CSS switches visibility)
+    btn.innerHTML = `
+      <svg class="locate-icon locate-icon-desktop" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="20" cy="20" r="10" stroke="currentColor" stroke-width="3.2" fill="none"/>
+        <circle cx="20" cy="20" r="3.5" fill="currentColor"/>
+        <line x1="20" y1="2" x2="20" y2="9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        <line x1="20" y1="31" x2="20" y2="38" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        <line x1="2" y1="20" x2="9" y2="20" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        <line x1="31" y1="20" x2="38" y2="20" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+      <svg class="locate-icon locate-icon-mobile" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.5" fill="currentColor"/>
+        <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="2" fill="none" opacity="0.55"/>
+      </svg>
+    `;
+
+    let locating = false;
+    let locationMarker = null;
+    let locationCircle = null;
+
+    L.DomEvent.disableClickPropagation(btn);
+    L.DomEvent.on(btn, 'click', () => {
+      if (locating) return;
+      if (!navigator.geolocation) {
+        btn.classList.add('locate-btn--error');
+        setTimeout(() => btn.classList.remove('locate-btn--error'), 1800);
+        return;
+      }
+      locating = true;
+      btn.classList.add('locate-btn--locating');
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          locating = false;
+          btn.classList.remove('locate-btn--locating');
+          btn.classList.add('locate-btn--active');
+          setTimeout(() => btn.classList.remove('locate-btn--active'), 2200);
+
+          const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+
+          // Remove old markers
+          if (locationMarker) { locationMarker.remove(); locationMarker = null; }
+          if (locationCircle) { locationCircle.remove(); locationCircle = null; }
+
+          // Accuracy ring
+          locationCircle = L.circle([lat, lng], {
+            radius: accuracy,
+            color: '#8fa3ff',
+            fillColor: '#8fa3ff',
+            fillOpacity: 0.12,
+            weight: 1.5
+          }).addTo(map);
+
+          // Location dot marker
+          const dotSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="20" height="20">
+            <circle cx="10" cy="10" r="7" fill="#8fa3ff" stroke="#fff" stroke-width="2.5"/>
+            <circle cx="10" cy="10" r="3" fill="#fff"/>
+          </svg>`;
+          const dotIcon = L.divIcon({
+            className: '',
+            html: dotSvg,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          });
+          locationMarker = L.marker([lat, lng], { icon: dotIcon, interactive: false }).addTo(map);
+
+          map.flyTo([lat, lng], Math.max(map.getZoom(), 14), { duration: 1 });
+        },
+        (err) => {
+          locating = false;
+          btn.classList.remove('locate-btn--locating');
+          btn.classList.add('locate-btn--error');
+          setTimeout(() => btn.classList.remove('locate-btn--error'), 1800);
+          console.warn('Geolocation error:', err.message);
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    });
+
+    return btn;
+  };
+
+  locationControl.addTo(map);
+}
+
 function runMapApp() {
   if (!window.L) throw new Error('Leaflet failed to load. Check internet or blocked unpkg.com');
 
@@ -728,6 +822,7 @@ function runMapApp() {
     position: 'topright'
   }).addTo(map);
   addCoordinateSearchControl();
+  addLocationControl();
 
   map.on('contextmenu', (e) => {
     const popupContent = buildMapContextMenu(e.latlng);
